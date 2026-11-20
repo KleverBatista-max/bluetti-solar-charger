@@ -1,0 +1,87 @@
+# Home Assistant package. Copy to <config>/packages/ and enable with:
+#   homeassistant:
+#     packages: !include_dir_named packages
+
+automation:
+  - id: '1773354972427'
+    alias: BLUETTI - Charger
+    description: Carga la AC70 con excedente real y la suelta cuando deja de ser sostenible
+    triggers:
+    - trigger: time_pattern
+      minutes: /2
+    conditions:
+    - condition: state
+      entity_id: input_boolean.auto_bluetti_charge
+      state: 'on'
+    actions:
+    - variables:
+        batt_w: '{{ states(''sensor.inverter_battery_power'')|float(0) }}'
+        bluetti_soc: '{{ states(''sensor.ac702439001070412_battery_soc'')|float(0) }}'
+        bluetti_time_h: '{{ states(''sensor.ac702439001070412_time_remaining'')|float(99)
+          }}'
+        bluetti_input_w: '{{ states(''sensor.ac702439001070412_ac_input_power'')|float(0)
+          }}'
+        plug_on: '{{ is_state(''switch.tp_link_smart_plug_d03c_pi'',''on'') }}'
+        start_surplus_w: -1600
+        bluetti_good_soc: 100
+        bluetti_low_soc: 10
+        bluetti_critical_soc: 5
+        bluetti_critical_time_h: 0.5
+    - choose:
+      - conditions:
+        - condition: template
+          value_template: "{{\n  bluetti_soc <= bluetti_critical_soc\n  or bluetti_time_h
+            <= bluetti_critical_time_h\n}}\n"
+        sequence:
+        - action: switch.turn_on
+          target:
+            entity_id: switch.tp_link_smart_plug_d03c_pi
+        - stop: Protección crítica Bluetti
+    - choose:
+      - conditions:
+        - condition: template
+          value_template: "{{\n  not plug_on\n  and batt_w <= start_surplus_w\n  and
+            bluetti_soc < 100\n}}\n"
+        sequence:
+        - action: switch.turn_on
+          target:
+            entity_id: switch.tp_link_smart_plug_d03c_pi
+        - stop: 'Excedente fuerte: conectar Bluetti'
+    - choose:
+      - conditions:
+        - condition: template
+          value_template: "{{\n  plug_on\n  and bluetti_soc < bluetti_good_soc\n}}\n"
+        sequence:
+        - stop: Bluetti aún cargando
+    - choose:
+      - conditions:
+        - condition: template
+          value_template: "{{\n  plug_on\n  and bluetti_soc >= bluetti_good_soc\n  and
+            batt_w < bluetti_input_w\n}}\n"
+        sequence:
+        - stop: Todavía sostenible por solar
+    - choose:
+      - conditions:
+        - condition: template
+          value_template: "{{\n  plug_on\n  and bluetti_soc >= bluetti_good_soc\n  and
+            batt_w >= bluetti_input_w\n}}\n"
+        sequence:
+        - action: switch.turn_off
+          target:
+            entity_id: switch.tp_link_smart_plug_d03c_pi
+        - stop: 'Ya no es solar sostenible: usar Bluetti como batería'
+    - choose:
+      - conditions:
+        - condition: template
+          value_template: "{{\n  not plug_on\n  and bluetti_soc <= bluetti_low_soc\n}}\n"
+        sequence:
+        - action: switch.turn_on
+          target:
+            entity_id: switch.tp_link_smart_plug_d03c_pi
+        - stop: 'Bluetti baja: reconectar'
+    mode: single
+
+input_boolean:
+  auto_bluetti_charge:
+    name: "Auto Bluetti Charge"
+    icon: "mdi:battery-charging"
